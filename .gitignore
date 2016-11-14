@@ -1,0 +1,5 @@
+data/binlog/*
+data/binlogsql/*
+data/result/*
+.idea/*
+*.pyc

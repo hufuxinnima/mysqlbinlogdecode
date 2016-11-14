@@ -1,0 +1,22 @@
+[configs]
+#数据库配置
+host=127.0.0.1
+user=root
+passwd=root
+port=3306
+#解析binlog的文件排序 asc 升序 desc 降序
+orderfile=asc
+#binlog存放目录
+binglogdir=data/binlog/
+#binlog中间数据目录
+sqlfiledir=data/binlogsql/
+#sql结果保存目录
+resultdir=data/result/
+#解压binlog同时开启的进程数
+binlogprocess=4
+#解析sql同时开启的进程数
+sqlprocess=4
+#批量插入数量
+insertmaxnum=500
+#删除的时候是否开启全字段匹配
+deletewhere=1
