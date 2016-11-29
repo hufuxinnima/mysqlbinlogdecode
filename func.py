@@ -4,9 +4,11 @@
 import logging
 import ConfigParser
 import re
-from multiprocessing import Pool
+from multiprocessing import Pool,Manager
 import os,sys
+import hashlib
 
+countdict = Manager().dict()
 #获取配置文件选项
 def getConfig(config_name):
     config = ConfigParser.ConfigParser()
@@ -14,6 +16,10 @@ def getConfig(config_name):
     config_values = config.get('configs', config_name)
     return config_values
 
+def md5(str):
+    m = hashlib.md5()
+    m.update(str)
+    return m.hexdigest()
 # 日志记录模块
 def logger():
     logger = logging.getLogger(__name__)
@@ -171,7 +177,9 @@ def converRun(action,binlogfile,dbname,tablefield,param={}):
         if not args.has_key('keysdict'):
             print "keys is null input keys"
             exit()
-
+    # count
+    elif action == 'countall':
+        funcname = "countAll"
 
     if len(binlogfile) > 0:
         p = Pool(int(processnum))
@@ -181,6 +189,16 @@ def converRun(action,binlogfile,dbname,tablefield,param={}):
             p.apply_async(eval(funcname),args=(filename,sqlfile, dbname, tablefield,args))
         p.close()
         p.join()
+        if len(countdict) >0:
+            alldic = {}
+            for ck in countdict.keys():
+                if countdict.has_key(ck):
+                    for k in countdict[ck].keys():
+                        if alldic.has_key(k):
+                            alldic[k] = alldic[k] + countdict[ck][k]
+                        else:
+                            alldic[k] = countdict[ck][k]
+            print alldic
     else:
         print "Error: conver binlog is null "
         exit()
@@ -215,16 +233,17 @@ def converUpdate(filename,sqlfile,dbname,tablefield,args={}):
             else:
                 num = len(fields)
                 if set and set <= num:
-                    slen = line.rfind("/*")
-                    if slen > 0:
-                        sqlstr = sqlstr + " " + re.sub("^@[\d]+","`"+fields[set-1]+"`",line[:slen].strip().strip('\n').replace('###   ', '',1),1)
+                    vs = line.find("=")
+                    ve = line.rfind("/*")
+                    if vs > 0 and ve >0 :
+                        sqlstr = sqlstr + " " + "`"+fields[set-1]+"`='"+ addslashes(line[vs + 1:ve].strip().strip("'")) +"',"
                     else:
                         print "[Error] " + line
                         exit()
                     if set == num:
                         set = fieldsnum = 0
 
-                        result.append(sqlstr + wherestr)
+                        result.append(sqlstr.strip(",") + wherestr)
                         sqlstr = ''
                         wherestr=''
                         fields = []
@@ -282,16 +301,16 @@ def converKeyUpdate(filename,sqlfile,dbname,tablefield,args={}):
             else:
                 num = len(fields)
                 if set and set <= num:
-                    slen = line.rfind("/*")
-                    if slen > 0:
-                        sqlstr = sqlstr + " " + re.sub("^@[\d]+", "`" + fields[set - 1] + "`",
-                                                       line[:slen].strip().strip('\n').replace('###   ', '',1),1)
+                    vs = line.find("=")
+                    ve = line.rfind("/*")
+                    if vs > 0 and ve > 0:
+                        sqlstr = sqlstr + " " + "`" + fields[set - 1] + "`='" + addslashes(line[vs + 1:ve].strip().strip("'")) + "',"
                     else:
                         print "[Error] " + line
                         exit()
                     if set == num:
                         set = fieldsnum = 0
-                        result.append(sqlstr + wherestr)
+                        result.append(sqlstr.strip(",") + wherestr)
                         sqlstr = ''
                         wherestr = ''
                         fields = []
@@ -326,7 +345,7 @@ def converInsert(filename,sqlfile,dbname,tablefield,args={}):
                     slen = line.rfind("/*")
                     keystr = line[:slen].strip()
                     keylen = keystr.find("=")
-                    inserdata.append(keystr[keylen + 1:].strip())
+                    inserdata.append("'"+ addslashes(keystr[keylen + 1:].strip().strip("'")) +"'")
                     if set == num:
                         set = fieldsnum = 0
                         fields = []
@@ -383,7 +402,7 @@ def converKeyInsert(filename,sqlfile,dbname,tablefield,args={}):
                             set = fieldsnum = 0
                             fields = inserdata = []
                             continue
-                    inserdata.append(keystr[keylen + 1:].strip())
+                    inserdata.append("'" + addslashes(keystr[keylen + 1:].strip().strip("'")) + "'")
                     if set == num:
                         set = fieldsnum = 0
                         if len(inserdata) == num:
@@ -435,7 +454,7 @@ def converUniqueKeyInsert(filename,sqlfile,dbname,tablefield,args={}):
                     keylen = keystr.find("=")
                     if line.startswith('###   @1='):
                         idkey = keystr[keylen + 1:].strip("'")
-                    inserdata.append(keystr[keylen + 1:].strip())
+                    inserdata.append("'" + addslashes(keystr[keylen + 1:].strip().strip("'")) + "'")
                     if set == num:
 
                         fields = []
@@ -586,7 +605,7 @@ def converDeleteToInsert(filename,sqlfile,dbname,tablefield,args={}):
                     slen = line.rfind("/*")
                     keystr = line[:slen].strip()
                     keylen = keystr.find("=")
-                    deletedata.append(keystr[keylen + 1:].strip())
+                    deletedata.append("'"+addslashes(keystr[keylen + 1:].strip().strip("'"))+"'")
                     if set == num:
                         if len(deletedata) == num:
                             result.append("INSERT INTO `" + dbname + "`.`" + tablename + "` VALUES (" + ",".join(deletedata) + ");")
@@ -636,15 +655,16 @@ def converAll(filename,sqlfile,dbname,tablefield,args={}):
             else:
                 num = len(fields)
                 if set and set <= num:
-                    slen = line.rfind("/*")
-                    if slen > 0:
-                        sqlstr = sqlstr + " " + re.sub("^@[\d]+", "`" + fields[set - 1] + "`",line[:slen].strip().strip('\n').replace('###   ', '', 1), 1)
+                    vs = line.find("=")
+                    ve = line.rfind("/*")
+                    if vs > 0 and ve > 0:
+                        sqlstr = sqlstr + " " + "`" + fields[set - 1] + "`='" + addslashes(line[vs + 1:ve].strip().strip("'")) + "',"
                     else:
                         print "[Error] " + line
                         exit()
                     if set == num:
                         set = fieldsnum = 0
-                        result.append(sqlstr + wherestr)
+                        result.append(sqlstr.strip(",") + wherestr)
                         sqlstr = wherestr =''
                         fields = []
                         continue
@@ -662,7 +682,7 @@ def converAll(filename,sqlfile,dbname,tablefield,args={}):
                     slen = line.rfind("/*")
                     keystr = line[:slen].strip()
                     keylen = keystr.find("=")
-                    tmpdata.append(keystr[keylen + 1:].strip())
+                    tmpdata.append("'"+addslashes(keystr[keylen + 1:].strip().strip("'"))+"'")
                     if set == num:
                         if len(tmpdata) == num:
                             result.append("INSERT INTO `" + dbname + "`.`" + tablename + "` VALUES (" + ",".join(tmpdata) + ");")
@@ -687,7 +707,7 @@ def converAll(filename,sqlfile,dbname,tablefield,args={}):
                     keylen = keystr.find("=")
 
                     if args["deletewhere"] == 1:
-                        tmpdata.append("`" + fields[set - 1] + "`=" + keystr[keylen + 1:].strip())
+                        tmpdata.append("`" + fields[set - 1] + "`='" + addslashes(keystr[keylen + 1:].strip().strip("'"))+ "'" )
                         if set == num:
                             if len(tmpdata) == num:
                                 result.append("DELETE FROM `" + dbname + "`.`" + tablename + "` WHERE " + " AND ".join(
@@ -765,15 +785,17 @@ def converKeyAll(filename,sqlfile,dbname,tablefield,args={}):
             else:
                 num = len(fields)
                 if set and set <= num:
-                    slen = line.rfind("/*")
-                    if slen > 0:
-                        sqlstr = sqlstr + " " + re.sub("^@[\d]+", "`" + fields[set - 1] + "`",line[:slen].strip().strip('\n').replace('###   ', '', 1), 1)
+                    vs = line.find("=")
+                    ve = line.rfind("/*")
+                    if vs > 0 and ve > 0:
+                        sqlstr = sqlstr + " " + "`" + fields[set - 1] + "`='" + addslashes(
+                            line[vs + 1:ve].strip().strip("'")) + "',"
                     else:
                         print "[Error] " + line
                         exit()
                     if set == num:
                         set = fieldsnum = 0
-                        result.append(sqlstr + wherestr)
+                        result.append(sqlstr.strip(",") + wherestr)
                         sqlstr = wherestr =''
                         fields = []
                         continue
@@ -797,7 +819,7 @@ def converKeyAll(filename,sqlfile,dbname,tablefield,args={}):
                             set = fieldsnum = 0
                             fields = tmpdata = []
                             continue
-                    tmpdata.append(keystr[keylen + 1:].strip())
+                    tmpdata.append("'" + addslashes(keystr[keylen + 1:].strip().strip("'")) + "'")
                     if set == num:
                         if len(tmpdata) == num:
                             result.append("INSERT INTO `" + dbname + "`.`" + tablename + "` VALUES (" + ",".join(tmpdata) + ");")
@@ -829,7 +851,7 @@ def converKeyAll(filename,sqlfile,dbname,tablefield,args={}):
                                 set = fieldsnum = 0
                                 tmpdata = fields = []
                                 continue
-                        tmpdata.append("`" + fields[set - 1] + "`=" + keystr[keylen + 1:].strip())
+                        tmpdata.append("`" + fields[set - 1] + "`='" + addslashes(keystr[keylen + 1:].strip().strip("'")) + "'")
                         if set == num:
                             if len(tmpdata) == num:
                                 result.append("DELETE FROM `" + dbname + "`.`" + tablename + "` WHERE " + " AND ".join(
@@ -868,9 +890,34 @@ def converKeyAll(filename,sqlfile,dbname,tablefield,args={}):
                     fieldsnum = 3
     f.close()
     fileDump(result, filename)
+def countAll(filename,sqlfile,dbname,tablefield,args={}):
+    f = open(sqlfile, 'r')
+    result = {}
+    for line in f.readlines():
+        if line.startswith('### UPDATE `') or line.startswith('### INSERT INTO `') or line.startswith('### DELETE FROM `'):
+            t = re.search("`(.*)`\.`(.*)`", line)
+            action = line.split(" ")[1].strip()
+            rekey = t.group(1)+"-"+t.group(2)+":" + action
+            if result.has_key(rekey):
+                result[rekey] = result[rekey] + 1
+            else:
+                result[rekey] = 1
+    countdict[md5(sqlfile)] = result
+
 def fileDump(data,filename):
     resultdir = getConfig('resultdir')
     bin_file = open(resultdir+filename, "a")
     for line in data:
         bin_file.write(line + "\n")
     bin_file.close()
+def mergeSql():
+    redir = getConfig('resultdir')
+    resultfilelist = fileList(redir)
+    if len(resultfilelist) > 0:
+        allsql = open(redir + "all.sql", "a")
+        for re in resultfilelist:
+            f = open(redir + re, 'r')
+            for line in f.readlines():
+                allsql.write(line)
+            f.close()
+        allsql.close()

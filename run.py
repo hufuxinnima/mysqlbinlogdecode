@@ -44,6 +44,7 @@ if __name__ == '__main__':
             if args.keys:
                 param['keys']=args.keys
             func.converRun(args.action, binlogfile, str(args.dbname), tablefield, param)
+            func.mergeSql()
         else:
             print "Error: table error"
     else:
